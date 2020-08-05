@@ -4,8 +4,10 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"io"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func CLI(args []string) int {
@@ -30,9 +32,10 @@ const (
 )
 
 type appEnv struct {
-	limit   int
-	csv     string
-	csvFile *os.File
+	limit     int64
+	csv       string
+	csvFile   *os.File
+	questions [][]string
 }
 
 func (app *appEnv) fromArgs(args []string) error {
@@ -40,7 +43,7 @@ func (app *appEnv) fromArgs(args []string) error {
 	fl.StringVar(
 		&app.csv, "csv", defaultProblems, "a csv file in the format of \"question,answer\"",
 	)
-	fl.IntVar(
+	fl.Int64Var(
 		&app.limit, "limit", defaultTimeLimit, "the time limit for the quiz in seconds",
 	)
 
@@ -60,37 +63,75 @@ func (app *appEnv) fromArgs(args []string) error {
 }
 
 func (app *appEnv) run() error {
-	// read csv and ask questions
-	r := csv.NewReader(app.csvFile)
-	problemNum := 0
 	score := 0
 
-	for {
-		record, err := r.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
+	timer := time.NewTimer(time.Second * time.Duration(app.limit))
+	defer timer.Stop()
 
-		problemNum++
-		fmt.Printf("Problem #%v: %v = ", problemNum, record[0])
+	done := make(chan struct{}, 1)
+	errCh := make(chan error)
 
-		var answer string
-		n, err := fmt.Scan(&answer)
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return fmt.Errorf("wrong number of arguments: %v instead of 1", n)
-		}
-		if answer == record[1] {
-			score++
-		}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	problemNum, err := app.readQuestions()
+	if err != nil {
+		return err
 	}
 
-	//output final result
-	fmt.Printf("You scored %v out of %v.\n", score, problemNum)
-	return nil
+	go func() {
+		for i, question := range app.questions {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
+			fmt.Printf("Problem #%v: %v = ", i, question[0])
+
+			var answer string
+			n, err := fmt.Scan(&answer)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if n != 1 {
+				errCh <- fmt.Errorf("wrong number of arguments: %v instead of 1", n)
+				return
+			}
+			if answer == question[1] {
+				score++
+			}
+		}
+		done <- struct{}{}
+	}()
+
+	for {
+		select {
+		case <-quit:
+			fmt.Printf("\nYou scored %v out of %v.\n", score, problemNum)
+			return nil
+		case err := <-errCh:
+			return err
+		case <-done:
+			fmt.Printf("\nYou scored %v out of %v.\n", score, problemNum)
+			return nil
+		case <-timer.C:
+			done <- struct{}{}
+			fmt.Printf("\nYou scored %v out of %v.\n", score, problemNum)
+			return nil
+		}
+	}
+}
+
+func (app *appEnv) readQuestions() (int, error) {
+	r := csv.NewReader(app.csvFile)
+	records, err := r.ReadAll()
+	if err != nil {
+		return 0, err
+	}
+
+	app.questions = records
+	problemNum := len(app.questions)
+	return problemNum, nil
 }
