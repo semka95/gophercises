@@ -32,10 +32,15 @@ const (
 )
 
 type appEnv struct {
-	limit     int64
-	csv       string
-	csvFile   *os.File
-	questions [][]string
+	limit    int64
+	csv      string
+	csvFile  *os.File
+	problems []problem
+}
+
+type problem struct {
+	question string
+	answer   string
 }
 
 func (app *appEnv) fromArgs(args []string) error {
@@ -65,73 +70,79 @@ func (app *appEnv) fromArgs(args []string) error {
 func (app *appEnv) run() error {
 	score := 0
 
-	timer := time.NewTimer(time.Second * time.Duration(app.limit))
-	defer timer.Stop()
-
-	done := make(chan struct{}, 1)
 	errCh := make(chan error)
+	answerCh := make(chan string)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
-	problemNum, err := app.readQuestions()
+	problemNum, err := app.parseProblems()
 	if err != nil {
 		return err
 	}
 
-	go func() {
-		for i, question := range app.questions {
-			select {
-			case <-done:
-				return
-			default:
-			}
+	timer := time.NewTimer(time.Second * time.Duration(app.limit))
+	defer timer.Stop()
 
-			fmt.Printf("Problem #%v: %v = ", i, question[0])
+	for i, problem := range app.problems {
+		fmt.Printf("Problem #%v: %v = ", i+1, problem.question)
 
-			var answer string
-			n, err := fmt.Scan(&answer)
-			if err != nil {
-				errCh <- err
-				return
-			}
-			if n != 1 {
-				errCh <- fmt.Errorf("wrong number of arguments: %v instead of 1", n)
-				return
-			}
-			if answer == question[1] {
+		go getAnswer(answerCh, errCh)
+
+		select {
+		case answer := <-answerCh:
+			if answer == problem.answer {
 				score++
 			}
-		}
-		done <- struct{}{}
-	}()
-
-	for {
-		select {
 		case <-quit:
-			fmt.Printf("\nYou scored %v out of %v.\n", score, problemNum)
+			fmt.Printf("\nProgram interrupted. You scored %v out of %v.\n", score, problemNum)
+			fmt.Print("Press enter to quit...")
+			<-errCh
 			return nil
 		case err := <-errCh:
 			return err
-		case <-done:
-			fmt.Printf("\nYou scored %v out of %v.\n", score, problemNum)
-			return nil
 		case <-timer.C:
-			done <- struct{}{}
-			fmt.Printf("\nYou scored %v out of %v.\n", score, problemNum)
+			fmt.Printf("\nTime ran out (%vs). You scored %v out of %v.\n", app.limit, score, problemNum)
+			fmt.Print("Press enter to quit...")
+			<-errCh
 			return nil
 		}
 	}
+
+	fmt.Printf("You scored %v out of %v.\n", score, problemNum)
+	fmt.Print("Press enter to quit...")
+	fmt.Scanf("\n")
+
+	return nil
 }
 
-func (app *appEnv) readQuestions() (int, error) {
+func getAnswer(answerCh chan string, errCh chan error) {
+	var answer string
+	n, err := fmt.Scanf("%s\n", &answer)
+	if err != nil {
+		errCh <- err
+		return
+	}
+	if n != 1 {
+		errCh <- fmt.Errorf("wrong number of arguments: %v instead of 1", n)
+		return
+	}
+	answerCh <- answer
+}
+
+func (app *appEnv) parseProblems() (int, error) {
 	r := csv.NewReader(app.csvFile)
 	records, err := r.ReadAll()
 	if err != nil {
 		return 0, err
 	}
 
-	app.questions = records
-	problemNum := len(app.questions)
+	problemNum := len(records)
+	app.problems = make([]problem, problemNum)
+
+	for i, record := range records {
+		app.problems[i] = problem{question: record[0], answer: record[1]}
+	}
+
 	return problemNum, nil
 }
