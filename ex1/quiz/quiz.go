@@ -87,6 +87,7 @@ func (app *appEnv) run() error {
 	for i, problem := range app.problems {
 		fmt.Printf("Problem #%v: %v = ", i+1, problem.question)
 
+		//TODO: use single goroutine and in/out channels instead creating goroutine for every problem
 		go getAnswer(answerCh, errCh)
 
 		select {
