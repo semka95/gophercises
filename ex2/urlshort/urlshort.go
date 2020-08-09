@@ -1,14 +1,15 @@
 package urlshort
 
 import (
+	"encoding/json"
 	"gopkg.in/yaml.v3"
 	"net/http"
 )
 
 // Link represents path and corresponding link
 type Link struct {
-	Path string `yaml:"path"`
-	URL  string `yaml:"url"`
+	Path string `yaml:"path" json:"path"`
+	URL  string `yaml:"url" json:"url"`
 }
 
 // MapHandler will return an http.HandlerFunc (which also
@@ -56,6 +57,7 @@ func YAMLHandler(yml []byte, fallback http.Handler) (http.HandlerFunc, error) {
 	return MapHandler(pathMap, fallback), nil
 }
 
+// parseYAML parses YAML and returns array of Links
 func parseYAML(yml []byte) ([]Link, error) {
 	var link []Link
 
@@ -67,12 +69,54 @@ func parseYAML(yml []byte) ([]Link, error) {
 	return link, nil
 }
 
+// JSONHandler will parse the provided JSON and then return
+// an http.HandlerFunc (which also implements http.Handler)
+// that will attempt to map any paths to their corresponding
+// URL. If the path is not provided in the JSON, then the
+// fallback http.Handler will be called instead.
+//
+// JSON is expected to be in the format:
+//
+//	[
+// 		{
+//			"path": "path",
+//    		"url": "url"
+//  	}
+//	]
+//
+// The only errors that can be returned all related to having
+// invalid JSON data.
+//
+// See MapHandler to create a similar http.HandlerFunc via
+// a mapping of paths to urls.
+func JSONHandler(jsn []byte, fallback http.Handler) (http.HandlerFunc, error) {
+	parsedJson, err := parseJSON(jsn)
+	if err != nil {
+		return nil, err
+	}
+	pathMap := buildMap(parsedJson)
+
+	return MapHandler(pathMap, fallback), nil
+}
+
+// parseJSON parses JSON and returns array of Links
+func parseJSON(jsn []byte) ([]Link, error) {
+	var link []Link
+
+	err := json.Unmarshal(jsn, &link)
+	if err != nil {
+		return nil, err
+	}
+
+	return link, nil
+}
+
+// buildMap converts []Link to map[string]string
 func buildMap(parsedYaml []Link) map[string]string {
 	pathMap := make(map[string]string, len(parsedYaml))
 	for _, v := range parsedYaml {
 		pathMap[v.Path] = v.URL
 	}
-
 
 	return pathMap
 }
