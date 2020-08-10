@@ -2,6 +2,7 @@ package urlshort
 
 import (
 	"encoding/json"
+	bolt "go.etcd.io/bbolt"
 	"gopkg.in/yaml.v3"
 	"net/http"
 )
@@ -119,4 +120,24 @@ func buildMap(parsedYaml []Link) map[string]string {
 	}
 
 	return pathMap
+}
+
+func BoltHandler(db *bolt.DB, fallback http.Handler) (http.HandlerFunc, error) {
+	pathMap := make(map[string]string)
+
+	if err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("links"))
+
+		if err := b.ForEach(func(k, v []byte) error {
+			pathMap[string(k)] = string(v)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return MapHandler(pathMap, fallback), nil
 }
