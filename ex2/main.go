@@ -3,10 +3,16 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/semka95/gophercises/ex2/urlshort"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/semka95/gophercises/ex2/urlshort"
+	bolt "go.etcd.io/bbolt"
 )
 
 var (
@@ -58,6 +64,36 @@ func main() {
 
 	mux := defaultMux()
 
+	// Create BoltDB database
+	db, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.Remove(db.Path())
+	defer db.Close()
+
+	// Fill in data
+	err = fillBoltDB(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Listen for interrupt signal to close and cleanup database
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		dbPath := db.Path()
+		if err := db.Close(); err != nil {
+			log.Fatal(err)
+		}
+
+		if err := os.Remove(dbPath); err != nil {
+			log.Fatal(err)
+		}
+		os.Exit(0)
+	}()
+
 	// Build the MapHandler using the mux as the fallback
 	pathsToUrls := map[string]string{
 		"/urlshort-godoc": "https://godoc.org/github.com/gophercises/urlshort",
@@ -77,8 +113,36 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// Build the BoltHandler using the JSONHandler as the
+	// fallback
+	boltHandler, err := urlshort.BoltHandler(db, jsonHandler)
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println("Starting the server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", jsonHandler))
+	log.Fatal(http.ListenAndServe(":8080", boltHandler))
+}
+
+func fillBoltDB(db *bolt.DB) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("links"))
+		if err != nil {
+			return err
+		}
+
+		if err := b.Put([]byte("/bolt"), []byte("https://pkg.go.dev/go.etcd.io/bbolt")); err != nil {
+			return err
+		}
+		if err := b.Put([]byte("/yandex"), []byte("https://yandex.ru")); err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func defaultMux() *http.ServeMux {
