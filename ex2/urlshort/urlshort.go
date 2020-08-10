@@ -2,15 +2,27 @@ package urlshort
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+
 	bolt "go.etcd.io/bbolt"
 	"gopkg.in/yaml.v3"
-	"net/http"
 )
 
 // Link represents path and corresponding link
 type Link struct {
 	Path string `yaml:"path" json:"path"`
 	URL  string `yaml:"url" json:"url"`
+}
+
+func defaultMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", hello)
+	return mux
+}
+
+func hello(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "Hello, world!")
 }
 
 // MapHandler will return an http.HandlerFunc (which also
@@ -122,6 +134,11 @@ func buildMap(parsedYaml []Link) map[string]string {
 	return pathMap
 }
 
+// BoltHandler will get data from BoltDB and then return
+// an http.HandlerFunc (which also implements http.Handler)
+// that will attempt to map any paths to their corresponding
+// URL. If the path is not provided in the database, then the
+// fallback http.Handler will be called instead.
 func BoltHandler(db *bolt.DB, fallback http.Handler) (http.HandlerFunc, error) {
 	pathMap := make(map[string]string)
 
