@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Choose Your Own Adventure</title>
+</head>
+<body>
+<h3>{{.Title}}</h3>
+
+{{range .Story}}
+    <p>{{ . }}</p>
+{{end}}
+
+{{range .Options}}
+    <p><a href="http://localhost:8080/{{.Arc}}">{{.Text}}</a></p>
+{{end}}
+</body>
+</html>
