@@ -7,33 +7,37 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 )
 
-type Arc struct {
-	Title   string
-	Story   []string
-	Options []Options
+type Story map[string]Chapter
+
+type Chapter struct {
+	Title      string    `json:"title"`
+	Paragraphs []string  `json:"story"`
+	Options    []Options `json:"options"`
 }
 
 type Options struct {
-	Text string
-	Arc  string
+	Text    string `json:"text"`
+	Chapter string `json:"arc"`
 }
 
 type Srv struct {
-	Arcs     map[string]Arc
+	Story    Story
 	Template *template.Template
 }
 
 func main() {
-	arcs := make(map[string]Arc)
+	var story Story
 
-	story, err := ioutil.ReadFile("./gopher.json")
+	storyFile, err := os.Open("./gopher.json")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = json.Unmarshal(story, &arcs)
+	jd := json.NewDecoder(storyFile)
+	err = jd.Decode(&story)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,13 +47,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tmpl, err := template.New("Arc").Parse(string(t))
+	tmpl, err := template.New("Story").Parse(string(t))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	srv := &Srv{
-		Arcs:     arcs,
+		Story:    story,
 		Template: tmpl,
 	}
 
@@ -59,7 +63,7 @@ func main() {
 
 func (s *Srv) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[1:]
-	if v, ok := s.Arcs[path]; ok {
+	if v, ok := s.Story[path]; ok {
 		err := s.Template.Execute(w, v)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
