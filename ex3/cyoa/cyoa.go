@@ -1,17 +1,15 @@
+// cyoa is a package for building Choose Your Own Adventure
+// stories that can be rendered via the resulting http.Handler
+// or command line interface
 package cyoa
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"io/ioutil"
-	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 )
 
 // CLI runs the go-cyoa command line app and returns its exit status.
@@ -28,15 +26,21 @@ func CLI(args []string) int {
 	return 0
 }
 
+// appEnv represents parsed command line arguments
 type appEnv struct {
 	outputCLI bool
 	storyJSON string
+	intro     string
 }
 
+// fromArgs parses command line arguments into appEnv struct
 func (app *appEnv) fromArgs(args []string) error {
 	fl := flag.NewFlagSet("cyoa", flag.ContinueOnError)
 	fl.StringVar(
 		&app.storyJSON, "story", "./gopher.json", "Path to story file in json format",
+	)
+	fl.StringVar(
+		&app.intro, "intro", "intro", "Intro chapter name",
 	)
 	outputType := fl.String(
 		"o", "web", "Print output in format: web/cli",
@@ -60,13 +64,14 @@ func (app *appEnv) run() error {
 	}
 
 	if app.outputCLI {
-		//cli := StoryCLI{
-		//	Story: story,
-		//}
-		//err := cli.runCLI()
-		//if err != nil {
-		//	return err
-		//}
+		cli := StoryCLI{
+			Story:        story,
+			IntroChapter: app.intro,
+		}
+		err := cli.runCLI()
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -76,11 +81,12 @@ func (app *appEnv) run() error {
 	}
 
 	storyServer := &StoryWebServer{
-		Story:    story,
-		Template: tmpl,
+		Story:        story,
+		Template:     tmpl,
+		IntroChapter: app.intro,
 	}
 
-	err = storyServer.startWeb()
+	err = storyServer.runWeb()
 	if err != nil {
 		return err
 	}
@@ -88,6 +94,7 @@ func (app *appEnv) run() error {
 	return nil
 }
 
+// parseStory parses story from json file
 func (app *appEnv) parseStory() (Story, error) {
 	storyFile, err := os.Open(app.storyJSON)
 	if err != nil {
@@ -104,6 +111,7 @@ func (app *appEnv) parseStory() (Story, error) {
 	return story, nil
 }
 
+// parseTemplate parses html template to be used in web server
 func (app *appEnv) parseTemplate() (*template.Template, error) {
 	tf, err := ioutil.ReadFile("./template.html")
 	if err != nil {
@@ -116,48 +124,4 @@ func (app *appEnv) parseTemplate() (*template.Template, error) {
 	}
 
 	return tmpl, nil
-}
-
-func (s *StoryWebServer) startWeb() error {
-	storyHandler := s.StoryHandler()
-
-	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: storyHandler,
-	}
-
-	// Launch server
-	go func() {
-		log.Printf("Starting the server on %s", srv.Addr)
-		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Println(err)
-		}
-	}()
-
-	// Listen for interrupt signal to close http server
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
-	log.Println("Program interrupted")
-
-	if err := srv.Shutdown(context.Background()); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *StoryWebServer) StoryHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path[1:]
-		if v, ok := s.Story[path]; ok {
-			err := s.Template.Execute(w, v)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-			return
-		}
-
-		http.Redirect(w, r, "http://localhost:8080/intro", http.StatusFound)
-	}
 }
