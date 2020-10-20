@@ -100,6 +100,7 @@ func (app *appEnv) parseStory() (Story, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer storyFile.Close()
 
 	var story Story
 	jd := json.NewDecoder(storyFile)
