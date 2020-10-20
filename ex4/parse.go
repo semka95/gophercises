@@ -1,8 +1,11 @@
+// link is a package for parsing HTML link tags (<a href="..."...</a>),
 package link
 
 import (
-	"golang.org/x/net/html"
 	"io"
+	"strings"
+
+	"golang.org/x/net/html"
 )
 
 // Link represents HTML link tag
@@ -11,7 +14,7 @@ type Link struct {
 	Text string
 }
 
-// ParseHTML parses given html file and returns all links
+// ParseHTML parses given html file and returns slice of links
 func ParseHTML(r io.Reader) ([]Link, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
@@ -29,7 +32,6 @@ func ParseHTML(r io.Reader) ([]Link, error) {
 			}
 
 			links = append(links, link)
-
 		}
 
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -43,22 +45,27 @@ func ParseHTML(r io.Reader) ([]Link, error) {
 }
 
 // parseLinkText extracts text from link tag
-func parseLinkText(n *html.Node) (text string) {
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == html.TextNode {
-			text += c.Data
-		}
-
-		if c.Type == html.ElementNode && c.FirstChild != nil {
-			text += c.FirstChild.Data
-		}
+func parseLinkText(n *html.Node) string {
+	if n.Type == html.TextNode {
+		return n.Data
 	}
 
-	return
+	if n.Type != html.ElementNode {
+		return ""
+	}
+
+	var text string
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		text += parseLinkText(c)
+	}
+
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // parseHref extracts href attribute from link tag
-func parseHref(attrs []html.Attribute) (href string) {
+func parseHref(attrs []html.Attribute) string {
+	var href string
+
 	for _, a := range attrs {
 		if a.Key == "href" {
 			href = a.Val
@@ -66,5 +73,5 @@ func parseHref(attrs []html.Attribute) (href string) {
 		}
 	}
 
-	return
+	return href
 }
