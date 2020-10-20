@@ -3,6 +3,7 @@ package link
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,19 +23,14 @@ func TestParseHtml(t *testing.T) {
 		{
 			"./ex2.html",
 			[]Link{
-				{Href: "https://www.twitter.com/joncalhoun", Text: `
-        Check me out on twitter
-        
-    `},
-				{Href: "https://github.com/gophercises", Text: `
-        Gophercises is on Github!
-    `},
+				{Href: "https://www.twitter.com/joncalhoun", Text: `Check me out on twitter`},
+				{Href: "https://github.com/gophercises", Text: `Gophercises is on Github!`},
 			},
 		},
 		{
 			"./ex3.html",
 			[]Link{
-				{Href: "#", Text: "Login "},
+				{Href: "#", Text: "Login"},
 				{Href: "/lost", Text: "Lost? Need help?"},
 				{Href: "https://twitter.com/marcusolsson", Text: "@marcusolsson"},
 			},
@@ -42,7 +38,7 @@ func TestParseHtml(t *testing.T) {
 		{
 			"./ex4.html",
 			[]Link{
-				{Href: "/dog-cat", Text: "dog cat "},
+				{Href: "/dog-cat", Text: "dog cat"},
 			},
 		},
 	}
@@ -51,6 +47,7 @@ func TestParseHtml(t *testing.T) {
 		t.Run(fmt.Sprintf("%s file", test.HtmlPath), func(t *testing.T) {
 			f, err := os.Open(test.HtmlPath)
 			assert.NoError(t, err)
+			defer f.Close()
 
 			got, err := ParseHTML(f)
 			assert.NoError(t, err)
@@ -58,4 +55,17 @@ func TestParseHtml(t *testing.T) {
 			assert.EqualValues(t, test.Links, got)
 		})
 	}
+}
+
+func ExampleParseHTML() {
+	htmlFile := `<html><body><h1>Hello!</h1><a href="/other-page">A link to another page</a></body></html>`
+
+	r := strings.NewReader(htmlFile)
+	result, err := ParseHTML(r)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%+v\n", result)
+	// Output: [{Href:/other-page Text:A link to another page}]
 }
