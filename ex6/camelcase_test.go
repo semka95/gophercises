@@ -6,7 +6,7 @@ func TestCamelcase(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		want  int32
+		want  int
 	}{
 		{
 			"normal 5 words",
