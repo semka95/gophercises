@@ -39,7 +39,9 @@ const (
 // appEnv represents parsed command line arguments
 type appEnv struct {
 	command Command
-	args    string
+	task    string
+	doNums  []int
+	store   Storage
 }
 
 // fromArgs parses command line arguments into appEnv struct
@@ -60,7 +62,7 @@ func (app *appEnv) fromArgs() error {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			app.command = Add
-			app.args = strings.Join(args, " ")
+			app.task = strings.Join(args, " ")
 		},
 	}
 
@@ -68,14 +70,21 @@ func (app *appEnv) fromArgs() error {
 		Use:   "do [number of task to complete]",
 		Short: "Mark a task on your TODO list as complete",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 1 {
-				return fmt.Errorf("requires a number of task")
+			var ids []int
+			for _, arg := range args {
+				id, err := strconv.Atoi(arg)
+				if err != nil {
+					fmt.Println("Failed to parse the argument:", arg)
+					continue
+				}
+				ids = append(ids, id)
+			}
+			if len(ids) == 0 {
+				return fmt.Errorf("nothing to delete")
 			}
 
-			if _, err := strconv.Atoi(args[0]); err != nil {
-				return err
-			}
-			app.args = args[0]
+			app.doNums = ids
+
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
@@ -88,7 +97,6 @@ func (app *appEnv) fromArgs() error {
 		Short: "List all of your incomplete tasks",
 		Run: func(cmd *cobra.Command, args []string) {
 			app.command = List
-			app.args = ""
 		},
 	}
 
@@ -107,22 +115,79 @@ func (app *appEnv) run() error {
 	if err != nil {
 		return err
 	}
-
-	task := Task{
-		app.args,
-		storage,
-	}
+	app.store = storage
 
 	switch app.command {
 	case Add:
-		err = task.Add()
+		err = app.Add()
 	case List:
-		err = task.List()
+		err = app.List()
 	case Do:
-		err = task.Do()
+		err = app.Do()
 	default:
 		return nil
 	}
 
 	return err
+}
+
+// Task represents task
+type Task struct {
+	ID    int
+	Value string
+}
+
+// Add adds new task to Storage
+func (app appEnv) Add() error {
+	_, err := app.store.Store(app.task)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Added \"%v\" to your task list.\n", app.task)
+
+	return nil
+}
+
+// List displays all tasks
+func (app appEnv) List() error {
+	tasks, err := app.store.GetAll()
+	if err != nil {
+		return err
+	}
+
+	if len(tasks) == 0 {
+		fmt.Println("You have no tasks to complete! Why not take a vacation? 🏖")
+		return nil
+	}
+
+	fmt.Println("You have the following tasks:")
+	for i, task := range tasks {
+		fmt.Printf("%d. %s\n", i+1, task.Value)
+	}
+
+	return nil
+}
+
+// Do completes task by given number
+func (app appEnv) Do() error {
+	tasks, err := app.store.GetAll()
+	if err != nil {
+		return err
+	}
+
+	for _, id := range app.doNums {
+		if id <= 0 || id > len(tasks) {
+			fmt.Println("invalid task number: ", id)
+			continue
+		}
+		task := tasks[id-1]
+		err := app.store.Delete(task.ID)
+		if err != nil {
+			fmt.Printf("Failed to mark \"%d\" as completed. Error: %s\n", id, err)
+			continue
+		}
+		fmt.Printf("Marked \"%d\" as completed.\n", id)
+	}
+
+	return nil
 }
