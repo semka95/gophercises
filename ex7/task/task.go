@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,10 @@ const (
 	Do
 	// List task
 	List
+	// Remove task
+	Remove
+	// Completed tasks
+	Completed
 )
 
 // appEnv represents parsed command line arguments
@@ -74,13 +79,13 @@ func (app *appEnv) fromArgs() error {
 			for _, arg := range args {
 				id, err := strconv.Atoi(arg)
 				if err != nil {
-					fmt.Println("Failed to parse the argument:", arg)
+					fmt.Println("failed to parse the argument:", arg)
 					continue
 				}
 				ids = append(ids, id)
 			}
 			if len(ids) == 0 {
-				return fmt.Errorf("nothing to delete")
+				return fmt.Errorf("nothing to complete")
 			}
 
 			app.doNums = ids
@@ -100,9 +105,45 @@ func (app *appEnv) fromArgs() error {
 		},
 	}
 
+	var cmdRm = &cobra.Command{
+		Use:   "rm [number of task to remove]",
+		Short: "Delete a task from your TODO list",
+		Args: func(cmd *cobra.Command, args []string) error {
+			var ids []int
+			for _, arg := range args {
+				id, err := strconv.Atoi(arg)
+				if err != nil {
+					fmt.Println("failed to parse the argument:", arg)
+					continue
+				}
+				ids = append(ids, id)
+			}
+			if len(ids) == 0 {
+				return fmt.Errorf("nothing to delete")
+			}
+
+			app.doNums = ids
+
+			return nil
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			app.command = Remove
+		},
+	}
+
+	var cmdCompleted = &cobra.Command{
+		Use:   "completed [no options!]",
+		Short: "List all of your tasks completed today",
+		Run: func(cmd *cobra.Command, args []string) {
+			app.command = Completed
+		},
+	}
+
 	rootCmd.AddCommand(cmdAdd)
 	rootCmd.AddCommand(cmdDo)
 	rootCmd.AddCommand(cmdList)
+	rootCmd.AddCommand(cmdRm)
+	rootCmd.AddCommand(cmdCompleted)
 	if err := rootCmd.Execute(); err != nil {
 		return err
 	}
@@ -124,6 +165,10 @@ func (app *appEnv) run() error {
 		err = app.List()
 	case Do:
 		err = app.Do()
+	case Remove:
+		err = app.Remove()
+	case Completed:
+		err = app.Completed()
 	default:
 		return nil
 	}
@@ -133,8 +178,9 @@ func (app *appEnv) run() error {
 
 // Task represents task
 type Task struct {
-	ID    int
-	Value string
+	ID          int       `json:"id"`
+	Value       string    `json:"value"`
+	CompletedAt time.Time `json:"completed_at"`
 }
 
 // Add adds new task to Storage
@@ -181,12 +227,63 @@ func (app appEnv) Do() error {
 			continue
 		}
 		task := tasks[id-1]
-		err := app.store.Delete(task.ID)
+		err := app.store.Complete(task.ID)
 		if err != nil {
-			fmt.Printf("Failed to mark \"%d\" as completed. Error: %s\n", id, err)
+			fmt.Printf("failed to complete \"%d\" task. Error: %s\n", id, err)
 			continue
 		}
-		fmt.Printf("Marked \"%d\" as completed.\n", id)
+		fmt.Printf("You have complete the \"%s\" task.\n", task.Value)
+	}
+
+	return nil
+}
+
+// Remove deletes task from list
+func (app appEnv) Remove() error {
+	tasks, err := app.store.GetAll()
+	if err != nil {
+		return err
+	}
+
+	for _, id := range app.doNums {
+		if id <= 0 || id > len(tasks) {
+			fmt.Println("invalid task number: ", id)
+			continue
+		}
+		task := tasks[id-1]
+		err := app.store.Delete(task.ID)
+		if err != nil {
+			fmt.Printf("Failed to delete \"%d\" task. Error: %s\n", id, err)
+			continue
+		}
+		fmt.Printf("You have deleted the \"%s\" task.\n", task.Value)
+	}
+
+	return nil
+}
+
+// Completed displays all tasks completed today
+func (app appEnv) Completed() error {
+	tasks, err := app.store.GetAll()
+	if err != nil {
+		return err
+	}
+
+	if len(tasks) == 0 {
+		fmt.Println("You have no tasks at all! Why not take a vacation? 🏖")
+		return nil
+	}
+
+	fmt.Println("You have finished the following tasks today:")
+	for _, task := range tasks {
+		if task.CompletedAt.IsZero() {
+			continue
+		}
+		after := time.Now().Truncate(24 * time.Hour)
+		before := after.Add(24 * time.Hour)
+		if task.CompletedAt.After(after) && task.CompletedAt.Before(before) {
+			fmt.Printf("- %s\n", task.Value)
+		}
 	}
 
 	return nil

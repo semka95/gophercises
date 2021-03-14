@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -13,6 +14,7 @@ type Storage interface {
 	GetAll() ([]Task, error)
 	Store(task string) (int, error)
 	Delete(id int) error
+	Complete(id int) error
 }
 
 // BoltStore represents BoltDB Storage
@@ -54,14 +56,17 @@ func (s BoltStore) GetAll() ([]Task, error) {
 		b := tx.Bucket(s.bucketName)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			tasks = append(tasks, Task{
-				ID:    btoi(k),
-				Value: string(v),
-			})
+			task := Task{}
+
+			err := json.Unmarshal(v, &task)
+			if err != nil {
+				return err
+			}
+
+			tasks = append(tasks, task)
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -71,21 +76,30 @@ func (s BoltStore) GetAll() ([]Task, error) {
 
 // Store puts single task to database
 func (s BoltStore) Store(task string) (int, error) {
-	var id int
+	t := Task{
+		Value: task,
+	}
+
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(s.bucketName)
 		id64, err := b.NextSequence()
 		if err != nil {
 			return err
 		}
-		id = int(id64)
+		t.ID = int(id64)
 
-		return b.Put(itob(id), []byte(task))
+		buf, err := json.Marshal(t)
+		if err != nil {
+			return err
+		}
+
+		return b.Put(itob(t.ID), buf)
 	})
 	if err != nil {
 		return -1, err
 	}
-	return id, nil
+
+	return t.ID, nil
 }
 
 // Delete deletes task from database by given id
@@ -96,15 +110,35 @@ func (s BoltStore) Delete(id int) error {
 	})
 }
 
+// Complete marks task as completed by given id
+func (s BoltStore) Complete(id int) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(s.bucketName)
+
+		task := new(Task)
+		data := b.Get(itob(id))
+		if len(data) == 0 {
+			return fmt.Errorf("task %d does not exist", id)
+		}
+
+		err := json.Unmarshal(data, &task)
+		if err != nil {
+			return err
+		}
+
+		task.CompletedAt = time.Now()
+		enc, err := json.Marshal(task)
+		if err != nil {
+			return err
+		}
+
+		return b.Put(itob(id), enc)
+	})
+}
+
 // itob returns an 8-byte big endian representation of v
 func itob(v int) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, uint64(v))
 	return b
-}
-
-// btoi converts 8-byte big endian to int
-func btoi(b []byte) int {
-	i := binary.BigEndian.Uint64(b)
-	return int(i)
 }
